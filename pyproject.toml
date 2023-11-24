@@ -38,6 +38,9 @@ path = "src/renewableopt/__about__.py"
 dependencies = [
   "coverage[toml]>=6.5",
   "pytest",
+  "numpy>=1.24,<1.25",
+  "scipy>=1.10,<1.11",
+  "matplotlib>=3.7,<3.8",
 ]
 [tool.hatch.envs.default.scripts]
 test = "pytest {args:tests}"
@@ -76,6 +79,17 @@ all = [
   "style",
   "typing",
 ]
+
+[tool.hatch.envs.jupyter]
+extra-dependencies = [
+  # "jupyter>=1.0,<1.1",
+  "notebook>=6.4,<6.5",
+  # "nbclassic>=1.0,<1.1",
+  "jupyter_contrib_nbextensions>=0.7,<0.8"
+]
+
+[tool.hatch.envs.jupyter.scripts]
+server = "jupyter notebook"
 
 [tool.black]
 target-version = ["py37"]
@@ -121,6 +135,14 @@ ignore = [
   "S105", "S106", "S107",
   # Ignore complexity
   "C901", "PLR0911", "PLR0912", "PLR0913", "PLR0915",
+  # Allow uppercase variables, Allow asserts
+  "N803", "N806", "S101",
+  # Allow string literals in exceptions
+  "EM101",
+  # Datetime without timezone
+  "DTZ001"
+
+
 ]
 unfixable = [
   # Don't touch unused imports
