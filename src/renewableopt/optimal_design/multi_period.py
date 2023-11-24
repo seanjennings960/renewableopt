@@ -1,6 +1,7 @@
 import numpy as np
 from scipy.optimize import linprog
-from ..peak_id import gamma_matrix, assert_int, timedelta
+
+from renewableopt.peak_id import assert_int, gamma_matrix, timedelta
 
 STATUS_MESSAGES = {
     0 : "Optimization terminated successfully.",
@@ -10,12 +11,15 @@ STATUS_MESSAGES = {
     4 : "Numerical difficulties encountered."
 }
 
+GEN_PROFILE_MAX_DIM = 2
+
 class MultiPeriodResult:
     def __init__(self, result, model, dt, scenarios, num_generation, C, b0):
         if not result.success:
-            raise RuntimeError(f"Linear program failed with status code {result.status}:\n"
-                               f"{STATUS_MESSAGES[result.status]}")
-        
+            err = (f"Linear program failed with status code {result.status}:\n"
+                   f"{STATUS_MESSAGES[result.status]}")
+            raise RuntimeError(err)
+
         self.result = result
         self.model = model
         self.scenarios = scenarios
@@ -35,13 +39,13 @@ class MultiPeriodResult:
         self.C = C
         self.b0 = b0
         self.num_generation = num_generation
-        
+
     def battery_control(self, k):
         # Find the battery control for a given scenario
         start = k * self.num_timesteps
         end = (k + 1) * self.num_timesteps
         return self.result.x[start:end]
-        
+
     def battery_charge(self, u_batt):
         # Calculate state of charge based on the feasible
         # u_batt control.
@@ -49,7 +53,7 @@ class MultiPeriodResult:
         x0 = self.model.eta * self.E_max
         x = gamma @ u_batt + x0
         return np.r_[x0, x[:-1]]
-        
+
 class MultiPeriodModel:
     def __init__(self, initial_battery_charge, depth_of_discharge,
                  cost_battery_energy, cost_battery_power, cost_solar):
@@ -58,8 +62,8 @@ class MultiPeriodModel:
         self.cost_battery_energy = cost_battery_energy
         self.cost_battery_power = cost_battery_power
         self.cost_solar = cost_solar
-        
-        
+
+
     def minimize_cost(self, time, load, generation):
         """Minimize cost over multiple periods, ensuring battery is full at EoD."""
         T = time.shape[0]
@@ -70,22 +74,22 @@ class MultiPeriodModel:
         assert  set(scenarios) == set(generation.keys()), \
             "Load and generation dictionaries must have same keys."
         for l_profile in load.values():
-            # 
+            #
             assert l_profile.shape[0] == T, "Each load profile must have same number of timesteps."
-            
+
         generation = generation.copy()
         num_generation = None
         for name, gen in generation.items():
             assert gen.shape[0] == T, "Each generation profile must have same number of timesteps."
             if gen.ndim == 1:
                 generation[name] = gen[:, np.newaxis]
-            elif gen.ndim > 2:
+            elif gen.ndim > GEN_PROFILE_MAX_DIM:
                 raise ValueError("Got generation profile with dimension >2.")
             if num_generation is None:
                 num_generation = generation[name].shape[1]
             elif generation[name].shape[1] != num_generation:
                 raise ValueError("Not all generation scenarios have the same number of generation sources!")
-                
+
         # Constraint sensitivity w.r.t. battery control
         gamma = gamma_matrix(T, dt)
         A = np.vstack([
@@ -96,10 +100,10 @@ class MultiPeriodModel:
             np.eye(T),
             -np.eye(T)
         ])
-        
+
         zero = np.zeros(T)
         one = np.ones(T)
-        
+
         # Constraint sensitivity w.r.t. design parameters
         B_list = [
             np.c_[
@@ -111,7 +115,7 @@ class MultiPeriodModel:
             for k in scenarios
         ]
 
-        
+
         # Full constraint matrix for concatenated decision variables [u_k, d]
         C = np.c_[
             np.kron(np.eye(len(scenarios)), A),
@@ -128,8 +132,8 @@ class MultiPeriodModel:
                   self.cost_battery_energy,
                   self.cost_solar,
                  self.cost_battery_power]
-        
-        
+
+
         return MultiPeriodResult(
             linprog(c, A_ub=C, b_ub=b0, bounds=(None, None)),
             self,
@@ -138,3 +142,33 @@ class MultiPeriodModel:
             num_generation,
             C, b0
         )
+
+
+def greedy_battery_control(result, load, generation):
+    dt = result.dt
+    E_max = result.E_max
+    x0 = E_max * result.model.eta
+    P_max = result.P_battery
+    E_min = E_max * result.model.rho
+    # Various other controls are feasible and quite likely superior in terms
+    # of limiting degradation. But this should give a better sense of how much
+    # we are running up on the limits, than the control given by LP output?
+    u_out = np.zeros_like(load)
+    x_out = np.zeros_like(load)
+    for i, (load_t, gen_t) in enumerate(zip(load, generation)):
+        x_curr = x0 if i == 0 else x_out[i - 1]
+        # Pull maximum amount of generation (infinite curtailment)
+        u_curr = max(-P_max, load_t - gen_t)
+        if u_curr > P_max:
+            raise ValueError("Infeasible control: Load exceeds battery discharge limits.")
+        x_next = x_curr - dt * u_curr
+        if x_next < E_min:
+            raise ValueError("Infeasible control: Out of battery capacity.")
+        elif x_next > E_max:
+            # Battery is full!
+            x_next = E_max
+            u_curr = (x_curr - E_max) / dt
+        x_out[i] = x_next
+        u_out[i] = u_curr
+    return u_out, x_out
+
