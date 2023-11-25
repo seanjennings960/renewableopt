@@ -136,10 +136,11 @@ def min_capacity_per_month(result, soc_per_day, u_batt_per_day, time_one_day, lo
         }, time_one_day, load_per_day[day], generation_per_day[day], date)
 
 
-def lp_versus_greedy_comparison(result, time_one_day, worst_load, worst_solar_pu):
+def lp_versus_greedy_comparison(result, time_one_day, worst_load, worst_generation):
+    # Generation
     for scenario in result.scenarios:
         possible_controls = {}
-        generation = worst_solar_pu[scenario] * result.P_generation
+        generation = result.scale_generation(worst_generation[scenario])
         possible_controls["Greedy"] = greedy_battery_control(
             result, worst_load[scenario], generation)
         possible_controls["LP"] = (result.u_batt[scenario], result.x[scenario])

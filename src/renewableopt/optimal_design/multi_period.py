@@ -57,6 +57,25 @@ class MultiPeriodResult:
         x = gamma @ u_batt + x0
         return np.r_[x0, x[:-1]]
 
+    def scale_generation(self, generation_pu):
+        # Accepts pu generation of shape (T, G) (or shape (T,) if G=1).
+        # and returns a shape (T,) array of the total available generation
+        # at each time.
+        if generation_pu.ndim <= 1:
+            assert self.num_generation == 1, \
+                f"Got 1D generation_pu, but the number of generation sources is {self.num_generation}"
+        elif generation_pu.ndim != GEN_PROFILE_MAX_DIM:
+             raise ValueError("Only up to 2 dimensional generation profiles supported.")
+        else:
+            # 2D input array.
+            assert generation_pu.shape[1] == self.num_generation, \
+                f"Input has {generation_pu.shape[1]} generation sources, but result contains {self.num_generation}"
+
+        generation = generation_pu * self.P_generation
+        if generation.ndim == GEN_PROFILE_MAX_DIM:
+            generation = np.sum(generation, axis=-1)
+        return generation
+
 class MultiPeriodModel:
     def __init__(self, initial_battery_charge, depth_of_discharge,
                  cost_battery_energy, cost_battery_power, cost_generation):
