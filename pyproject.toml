@@ -138,7 +138,7 @@ ignore = [
   # Allow uppercase variables, Allow asserts
   "N803", "N806", "S101",
   # Allow string literals in exceptions
-  "EM101",
+  "EM101", "EM102",
   # Datetime without timezone
   "DTZ001"
 
