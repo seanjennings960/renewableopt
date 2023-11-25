@@ -26,6 +26,7 @@ def load_solar_data(load_t):
 
 GENERATION_LOADER = {
     "solar": load_solar_data,
+    "geothermal": lambda _: 1
 }
 
 

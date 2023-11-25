@@ -1,5 +1,6 @@
 """Identification of days which produce peak stress on power system."""
 from functools import reduce
+
 import numpy as np
 
 
@@ -40,15 +41,15 @@ def reshape_by_day(time, load, solar_pu):
         arr.reshape(days, timesteps_per_day)
         for arr in [time, load, solar_pu]
     )
-    
-    
+
+
 def topological_sort(arr: np.ndarray, order=None, axis=0):
-    """
+    r"""
     Return a graph (adjacency matrix) of a (partial) order along given axis.
-    
+
     Let M be a metric space. A slice of arr[axis] returns an
     ndarray[M].
-    
+
     Arguments:
         arr: array to be sorted
         order: function taking (a: M, b: ndarray[M]) and returning
@@ -85,23 +86,23 @@ def topo_argmax(arr):
 
 def manual_clustering(problem_days, peak_loads, daily_solar):
     problem_groups = {}
-    problem_groups['low_load_low_solar'] = problem_days[
-        peak_loads[problem_days] < 70
+    problem_groups["low_load_low_solar"] = problem_days[
+        peak_loads[problem_days] < 70  # noqa
     ]
-    problem_groups['medium_load_low_solar'] = problem_days[np.logical_and(
-        peak_loads[problem_days] > 70,
-        daily_solar[problem_days] > -2
+    problem_groups["medium_load_low_solar"] = problem_days[np.logical_and(
+        peak_loads[problem_days] > 70,  # noqa
+        daily_solar[problem_days] > -2  # noqa
     )]
-    problem_groups['medium_load_medium_solar'] = problem_days[np.logical_and(
-        daily_solar[problem_days] > -4,
-        daily_solar[problem_days] < -2
+    problem_groups["medium_load_medium_solar"] = problem_days[np.logical_and(
+        daily_solar[problem_days] > -4,  # noqa
+        daily_solar[problem_days] < -2  # noqa
     )]
-    problem_groups['high_load_cloudy'] = problem_days[np.logical_and(
-        daily_solar[problem_days] > -8,
-        daily_solar[problem_days] < -6
+    problem_groups["high_load_cloudy"] = problem_days[np.logical_and(
+        daily_solar[problem_days] > -8,  # noqa
+        daily_solar[problem_days] < -6  # noqa
     )]
-    problem_groups['high_load_sunny'] = problem_days[
-        daily_solar[problem_days] < -9,
+    problem_groups["high_load_sunny"] = problem_days[
+        daily_solar[problem_days] < -9,  # noqa
     ]
     return problem_groups
 
@@ -143,7 +144,7 @@ def identify_worst_days(time, load, solar_pu):
     # at relatively small optimality cost.
     problem_groups = manual_clustering(problem_days, peak_loads, daily_solar)
     assert_partition(problem_groups.values(), set(problem_days))
-    # For worst case generation, look at the integral, since any 
+    # For worst case generation, look at the integral, since any
     worst_load, worst_solar_energy = worst_case_by_group(
         problem_groups, load_per_day, energy_solar_per_day)
     worst_solar_pu = {
