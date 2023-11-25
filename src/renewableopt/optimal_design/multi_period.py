@@ -23,11 +23,14 @@ class MultiPeriodResult:
         self.result = result
         self.model = model
         self.scenarios = scenarios
-        self.E_max = result.x[-3]
-        self.P_solar = result.x[-2]
-        self.P_battery = result.x[-1]
+
+        num_design_params = num_generation + 2
+        design_params = result.x[-num_design_params:]
+        self.E_max = design_params[0]
+        self.P_battery = design_params[-1]
+        self.P_generation = design_params[1:-1]
         self.dt = dt
-        self.num_timesteps = assert_int((result.x.shape[0] - num_generation - 2) / len(scenarios))
+        self.num_timesteps = assert_int((result.x.shape[0] - num_design_params) / len(scenarios))
         self.u_batt = {
             name: self.battery_control(k)
             for k, name in enumerate(scenarios)
@@ -56,12 +59,13 @@ class MultiPeriodResult:
 
 class MultiPeriodModel:
     def __init__(self, initial_battery_charge, depth_of_discharge,
-                 cost_battery_energy, cost_battery_power, cost_solar):
+                 cost_battery_energy, cost_battery_power, cost_generation):
         self.eta = initial_battery_charge
         self.rho = depth_of_discharge
         self.cost_battery_energy = cost_battery_energy
         self.cost_battery_power = cost_battery_power
-        self.cost_solar = cost_solar
+        self.cost_generation = cost_generation
+        self.num_generation = len(cost_generation)
 
 
     def minimize_cost(self, time, load, generation):
@@ -78,17 +82,18 @@ class MultiPeriodModel:
             assert l_profile.shape[0] == T, "Each load profile must have same number of timesteps."
 
         generation = generation.copy()
-        num_generation = None
         for name, gen in generation.items():
             assert gen.shape[0] == T, "Each generation profile must have same number of timesteps."
             if gen.ndim == 1:
                 generation[name] = gen[:, np.newaxis]
+                assert self.num_generation == 1, \
+                    f"Generation array is 1D, but cost given for {self.num_generation} generation sources."
             elif gen.ndim > GEN_PROFILE_MAX_DIM:
                 raise ValueError("Got generation profile with dimension >2.")
-            if num_generation is None:
-                num_generation = generation[name].shape[1]
-            elif generation[name].shape[1] != num_generation:
-                raise ValueError("Not all generation scenarios have the same number of generation sources!")
+            elif generation[name].shape[1] != self.num_generation:
+                raise ValueError(
+                    "Not all generation scenarios have the same number of generation sources as given "
+                    f"number of generation costs ({self.num_generation}!")
 
         # Constraint sensitivity w.r.t. battery control
         gamma = gamma_matrix(T, dt)
@@ -130,7 +135,7 @@ class MultiPeriodModel:
         # Costs associated with battery control (0) and system design
         c = np.r_[np.zeros(T * len(scenarios)),
                   self.cost_battery_energy,
-                  self.cost_solar,
+                  self.cost_generation,
                  self.cost_battery_power]
 
 
@@ -139,7 +144,7 @@ class MultiPeriodModel:
             self,
             dt,
             scenarios,
-            num_generation,
+            self.num_generation,
             C, b0
         )
 
