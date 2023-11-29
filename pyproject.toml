@@ -85,7 +85,8 @@ extra-dependencies = [
   # "jupyter>=1.0,<1.1",
   "notebook>=6.4,<6.5",
   # "nbclassic>=1.0,<1.1",
-  "jupyter_contrib_nbextensions>=0.7,<0.8"
+  "jupyter_contrib_nbextensions>=0.7,<0.8",
+  "PyQt5 >=5.15,<5.16"
 ]
 
 [tool.hatch.envs.jupyter.scripts]
@@ -140,7 +141,9 @@ ignore = [
   # Allow string literals in exceptions
   "EM101", "EM102",
   # Datetime without timezone
-  "DTZ001"
+  "DTZ001",
+  # Allow map keyword
+  "C417"
 
 
 ]
