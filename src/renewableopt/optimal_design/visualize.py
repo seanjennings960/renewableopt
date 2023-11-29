@@ -89,19 +89,21 @@ def daily_curtailment(dt, curtailment_by_day):
     plt.ylabel("Energy curtailed (MWh/day)")
 
 
-def plot_battery_status(result, possible_controls, time, load, generation, title=None):
-    fig, plots = plt.subplots(1, 2)
+def plot_battery_status(result, possible_controls, time, load, generation, title=None, plots=None):
+    if plots is None:
+        _, plots = plt.subplots(1, 2)
 
     title = f"Battery Status: {title}" if title is not None else "Battery Status"
     plt.suptitle(title)
     u_max, u_min = load, load - generation
 
     # Plot of battery power output
-    plots[0].plot(time, u_min, label="Load - Generation")
-    plots[0].plot(time, u_max, label="Load")
+    plots[0].plot(time, u_min, label="Meets Load w/ 0% Curtailment")
+    plots[0].plot(time, u_max, label="Meets Load w/ 100% Curtailment")
     max_u_batt = -np.inf
     for control_name, (u_batt, _) in possible_controls.items():
-        plots[0].plot(time, u_batt, label=f"Battery Power ({control_name})")
+        label = f"Battery Power ({control_name})" if control_name is not None else "Battery Power"
+        plots[0].plot(time, u_batt, label=label)
         max_u_batt = max(max_u_batt, np.max(u_batt))
 
     plots[0].set_xlabel("Time of Day (hr)")
@@ -110,11 +112,12 @@ def plot_battery_status(result, possible_controls, time, load, generation, title
     # Max and min lines based on maximum power output.
     plots[0].axhline(y=-result.P_battery, linestyle="--", color="green", label="Charge Limit")
     if np.max(max_u_batt) > 0.5 * result.P_battery:
-        plots[0].axhline(y=-result.P_battery, linestyle="--", color="orange", label="Discharge limit")
+        plots[0].axhline(y=result.P_battery, linestyle="--", color="orange", label="Discharge limit")
     plots[0].legend()
 
     for control_name, (_, soc) in possible_controls.items():
-        plots[1].plot(time, soc, label=f"SoC ({control_name})")
+        label = f"SoC ({control_name})" if control_name is not None else "SoC"
+        plots[1].plot(time, soc, label=label)
     plots[1].set_xlabel("Time of Day (hr)")
     plots[1].set_ylabel("Battery State of Charge (MWh)")
     # Capacity lines
@@ -136,12 +139,21 @@ def min_capacity_per_month(result, soc_per_day, u_batt_per_day, time_one_day, lo
         }, time_one_day, load_per_day[day], generation_per_day[day], date)
 
 
-def lp_versus_greedy_comparison(result, time_one_day, worst_load, worst_generation):
-    # Generation
-    for scenario in result.scenarios:
+def readable(s):
+    return " ".join(map(lambda word: word.capitalize(), s.split("_")))
+
+
+def lp_versus_greedy_comparison(result, time_one_day, worst_load, worst_generation, scenarios=None):
+    if scenarios is None:
+        # Show all scenarios by default!
+        scenarios = result.scenarios
+
+    for scenario in scenarios:
         possible_controls = {}
         generation = result.scale_generation(worst_generation[scenario])
         possible_controls["Greedy"] = greedy_battery_control(
             result, worst_load[scenario], generation)
         possible_controls["LP"] = (result.u_batt[scenario], result.x[scenario])
-        plot_battery_status(result, possible_controls, time_one_day, worst_load[scenario], generation)
+        plot_battery_status(
+            result, possible_controls, time_one_day, worst_load[scenario], generation,
+            title=readable(scenario))

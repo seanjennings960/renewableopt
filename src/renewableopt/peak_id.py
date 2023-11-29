@@ -119,7 +119,7 @@ def worst_case_by_group(problem_groups, load_per_day, energy_solar_per_day):
     return worst_load, worst_solar
 
 
-def identify_worst_days(time, load, solar_pu):
+def identify_worst_days(time, load, solar_pu, *, use_cap_ratio=False):
     dt = timedelta(time)
     time_per_day, load_per_day, solar_pu_per_day = reshape_by_day(
         time, load, solar_pu
@@ -134,6 +134,16 @@ def identify_worst_days(time, load, solar_pu):
     # as days with high load, so find maximums of partial ordering!
     peak_loads = np.max(load_per_day, axis=-1)
     daily_solar = np.min(energy_solar_per_day, axis=-1)
+
+    if use_cap_ratio:
+        cap_ratio = peak_loads / daily_solar
+        worst_index = np.argmin(cap_ratio)
+        return ({
+            "worst_cap_ratio": load_per_day[worst_index]
+        }, {
+            "worst_cap_ratio": solar_pu_per_day[worst_index]
+        })
+
     # TODO: consider minimum capacity factor than load peaks individually??
     problem_days = topo_argmax(np.c_[
         peak_loads, daily_solar
