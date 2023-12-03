@@ -231,3 +231,44 @@ def plot_stack(dispatch, curtailment=None):
     plots[1].set_ylabel("Battery SoC (MWh)")
     plots[1].legend()
     fig.autofmt_xdate(rotation=80)
+
+
+def plot_wind_solar_cluster(peak_data):
+    problem_groups = peak_data.problem_groups
+    load = peak_data.peak_loads
+    solar = peak_data.daily_solar_capacity
+    wind = peak_data.daily_wind_capacity
+    fig, plots = plt.subplots(2, 2)
+    first_run = True
+    labels = np.sort(list(problem_groups.keys()))
+    for x, y, i, j in [
+        (load, solar, 0, 0),
+        (load, wind, 1, 0),
+        (wind, solar, 0, 1),
+    ]:
+        for label in labels:
+            days = problem_groups[label]
+
+    #         group = kmeans.labels_ == label
+            plots[i][j].plot(x[days], y[days], "x", label=label)
+            if first_run:
+                plots[1][1].plot([0], [0], "x", label=label)
+        first_run = False
+
+    plots[0][0].set_xlabel("Peak Load (MW)")
+    plots[0][0].set_ylabel("Solar Daily Capacity Factor (%)")
+    plots[0][1].set_xlabel("Wind Daily Capacity Factor (%)")
+    plots[0][1].set_ylabel("Solar Daily Capacity Factor (%)")
+    plots[1][0].set_xlabel("Wind Daily Capacity Factor (%)")
+    plots[1][0].set_xlabel("Peak Load (MW)")
+    plots[1][1].legend()
+    plots[1][1].axis("off")
+
+
+def plot_cluster_1d(peak_data):
+    solar = peak_data.daily_solar_capacity
+    for name, days in peak_data.problem_groups.items():
+        plt.plot(peak_data.peak_loads[days], solar[days], "x", label=name)
+    plt.xlabel("Peak Load (MW)")
+    plt.ylabel("Daily Capacity Factor (%)")
+    plt.legend()

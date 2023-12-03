@@ -191,7 +191,7 @@ def worst_case_by_group(problem_groups, load_per_day, energy_solar_per_day):
 SUPPORTED_METHODS = ["manual_cluster", "kmeans_cluster", "cap_ratio", "peak_load"]
 
 
-def identify_worst_days(time, load, gen_pu, *, sources=None, method="solar_cluster"):
+def identify_worst_days(time, load, gen_pu, *, sources=None, method="kmeans_cluster"):
     if method not in SUPPORTED_METHODS:
         raise ValueError(f"Method {method} not supported. Select from: {SUPPORTED_METHODS}")
     dt = timedelta(time)
@@ -225,7 +225,7 @@ def identify_worst_days(time, load, gen_pu, *, sources=None, method="solar_clust
             "worst_cap_ratio": load_per_day[worst_index]
         }, {
             "worst_cap_ratio": gen_pu_per_day[worst_index]
-        })
+        }, peak_loads, daily_gen)
     elif method=="peak_load":
         worst_indices = np.argsort(peak_loads)
         return PeakData(
@@ -236,7 +236,7 @@ def identify_worst_days(time, load, gen_pu, *, sources=None, method="solar_clust
         }, {
             f"peak_{i}": gen_pu_per_day[i]
             for i in worst_indices[-5:]
-        })
+        }, peak_loads, daily_gen)
 
     elif method in ["manual_cluster", "kmeans_cluster"]:
         if method == "kmeans_cluster" and sources is None:
@@ -280,22 +280,27 @@ def identify_worst_days(time, load, gen_pu, *, sources=None, method="solar_clust
             for name, energy in worst_energy.items()
         }
         return PeakData(
-            problem_groups, worst_load, worst_gen_pu)
+            problem_groups, worst_load, worst_gen_pu, peak_loads, daily_gen)
 
 
 class PeakData:
-    def __init__(self, problem_groups, load, gen_pu):
+    def __init__(self, problem_groups, load, gen_pu, peak_loads, daily_gen):
         # Problem groups: Dict[group] -> List of days
         # load and solar_pu: Dict[group] -> array of load/generation
         self.problem_groups = problem_groups
         self.load = load
         self.gen_pu = gen_pu
+        self.peak_loads = peak_loads
+        self.daily_gen = daily_gen
+        if self.daily_gen.ndim == 1:
+            # HACK: Add new axis for when we do manual clustering and clobber
+            # the other ones...
+            self.daily_gen = daily_gen[:, np.newaxis]
 
-    @classmethod
-    def single_group(cls, name, problem_days, load_per_day, gen_per_day):
-        return cls(
-            {name: problem_days},
-            {name: load_per_day[d] for d in problem_days},
-            {name: gen_per_day[d] for d in problem_days},
-        )
+    @property
+    def daily_solar_capacity(self):
+        return  - self.daily_gen[:, 0] / 24 * 100
 
+    @property
+    def daily_wind_capacity(self):
+        return  - self.daily_gen[:, 1] / 24 * 100
