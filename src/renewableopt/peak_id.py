@@ -1,7 +1,9 @@
 """Identification of days which produce peak stress on power system."""
 from functools import reduce
+from itertools import groupby
 
 import numpy as np
+from sklearn.cluster import KMeans
 
 
 def assert_partition(parts, full_set):
@@ -24,22 +26,33 @@ def assert_int(a):
     return np.int32(a)
 
 
+def as_datetime(time_rel_hr):
+    # Convert to numpy datetime....
+    jan1 = np.datetime64("2012-01-01 00:00")
+    dts_min = (time_rel_hr * 60).astype("timedelta64[m]")
+    return jan1 + dts_min
+
+
 def timedelta(time):
     """Return the delta between each time[i+1] and time[i], asserting it constant."""
     dt = time[1] - time[0]
     assert np.all(np.isclose(np.diff(time), dt))
     return dt
 
-def reshape_by_day(time, load, generation_pu):
-    dt = timedelta(time)
+def shape_by_day(time_hr):
+    dt = timedelta(time_hr)
     timesteps_per_day = assert_int(24 / dt)
-    days = assert_int(time.shape[0] / timesteps_per_day)
+    days = assert_int(time_hr.shape[0] / timesteps_per_day)
+    return (days, timesteps_per_day)
+
+def reshape_by_day(time, *arrs):
+    days, timesteps_per_day = shape_by_day(time)
     # time_per_day = time.reshape(days, timesteps_per_day)
     # load_per_day = load.reshape(days, timesteps_per_day)
     # solar_pu_per_day = solar_pu.reshape(days, timesteps_per_day)
     return tuple(
         arr.reshape(days, timesteps_per_day, -1).squeeze()
-        for arr in [time, load, generation_pu]
+        for arr in [time, *arrs]
     )
 
 
@@ -107,6 +120,62 @@ def manual_clustering(problem_days, peak_loads, daily_solar):
     return problem_groups
 
 
+def dedup(a):
+    a_arr = np.copy(a)
+    out = a_arr.tolist()
+    dups = find_duplicates(a)
+    for dup in dups:
+        for i, dup_i in enumerate(np.argwhere(a_arr == dup)):
+            out[dup_i.squeeze()] += f"_{i}"
+    return out
+
+def find_duplicates(a):
+    return [x for x, g in groupby(np.sort(a)) if len(list(g)) > 1]
+
+
+def interval_namer(x):
+    x_range = np.linspace(np.min(x), np.max(x), 4)
+    intervals = [
+        ("low", x_range[0], x_range[1]),
+        ("medium", x_range[1], x_range[2]),
+        ("high", x_range[2], x_range[3]),
+    ]
+    def decide_name(y):
+        for name, low, high in intervals:
+            if low <= y <= high:
+                return name
+        return "out of bounds"
+    return decide_name
+
+def cluster_names(kmeans, peak_loads, daily_gen, sources):
+    load_namer = interval_namer(peak_loads)
+    gen_namers = {s: interval_namer(daily_gen[:, i])
+                 for i, s in enumerate(sources)}
+    names = []
+    for center in kmeans.cluster_centers_:
+        name = f"{load_namer(center[0])}_load"
+        for i, source in enumerate(sources):
+            name += f"_{gen_namers[source](center[i + 1])}_{source}"
+        names.append(name)
+    return dedup(names)
+
+
+
+def kmeans_cluster(problem_days, load, gen, sources, n_clusters=5):
+#     load = peak_loads[problem_days]
+#     gen = daily_gen[problem_days]
+    kmeans = KMeans(n_clusters=n_clusters, n_init="auto").fit(np.c_[
+        load, gen
+    ])
+    names = cluster_names(kmeans, load, gen, sources)
+    return {
+        name: problem_days[
+            kmeans.labels_ == i
+        ]
+        for i, name in enumerate(names)
+    }
+
+
 def worst_case_by_group(problem_groups, load_per_day, energy_solar_per_day):
     worst_load = {
         name: np.max(load_per_day[group], axis=0)
@@ -119,10 +188,10 @@ def worst_case_by_group(problem_groups, load_per_day, energy_solar_per_day):
     return worst_load, worst_solar
 
 
-SUPPORTED_METHODS = ["toposort", "cap_ratio", "peak_load"]
+SUPPORTED_METHODS = ["manual_cluster", "kmeans_cluster", "cap_ratio", "peak_load"]
 
 
-def identify_worst_days(time, load, gen_pu, *, method="toposort"):
+def identify_worst_days(time, load, gen_pu, *, sources=None, method="solar_cluster"):
     if method not in SUPPORTED_METHODS:
         raise ValueError(f"Method {method} not supported. Select from: {SUPPORTED_METHODS}")
     dt = timedelta(time)
@@ -136,50 +205,97 @@ def identify_worst_days(time, load, gen_pu, *, method="toposort"):
     # gen_pu_per_day has shape (days, timesteps, num_sources)
     if gen_pu_per_day.ndim < 3:  # noqa
         gen_pu_per_day = gen_pu_per_day[:, :, np.newaxis]
-    energy_solar_per_day = np.einsum(
-        "ijk,ja->ijk", gen_pu_per_day, gamma.T
+    energy_per_day = np.einsum(
+        "ijk,ja->iak", gen_pu_per_day, gamma.T
     )
 
     # Order by peak load and minimum daily solar generation.
     # Days with low generation could cause problems just as easily
     # as days with high load, so find maximums of partial ordering!
     peak_loads = np.max(load_per_day, axis=-1)
-    daily_gen = np.min(energy_solar_per_day, axis=1)
+    daily_gen = np.min(energy_per_day, axis=1)
 
     if method=="cap_ratio":
         # HACK: just use first generation source to determine ratio.
         cap_ratio = peak_loads / daily_gen[:, 0]
         worst_index = np.argmin(cap_ratio)
-        return ({
+        return PeakData({
+            "worst_cap_ratio": [worst_index]
+        }, {
             "worst_cap_ratio": load_per_day[worst_index]
         }, {
             "worst_cap_ratio": gen_pu_per_day[worst_index]
         })
     elif method=="peak_load":
         worst_indices = np.argsort(peak_loads)
-        return {
+        return PeakData(
+            {f"peak_{i}": [i] for i in worst_indices},
+            {
             f"peak_{i}": load_per_day[i]
             for i in worst_indices[-5:]
         }, {
             f"peak_{i}": gen_pu_per_day[i]
             for i in worst_indices[-5:]
+        })
+
+    elif method in ["manual_cluster", "kmeans_cluster"]:
+        if method == "kmeans_cluster" and sources is None:
+            raise ValueError("Sources must be specified with kmeans cluster method.")
+        # if method == "manual_cluster" and daily_gen.shape[1] > 1:
+        #     raise ValueError("Manual clustering only supported with solar data. "
+        #                      "Got multiple generation sources.")
+        if method == "manual_cluster":
+            daily_gen = daily_gen[:, sources.index("solar")]
+        else:
+            # Remove geothermal to make names less verbose.
+            nongeothermal = [i for i, s in enumerate(sources) if s != "geothermal"]
+            sources = [s for s in sources if s != "geothermal"]
+            daily_gen = daily_gen[:, nongeothermal]
+
+        # TODO: consider minimum capacity factor than load peaks individually??
+        problem_days = topo_argmax(np.c_[
+            peak_loads, daily_gen
+        ])
+
+        # Group together days which are close together on the (peak_load, daily_solar)
+        # plane and find the worst case within each group, to reduce computational burden,
+        # at relatively small optimality cost.
+        if method == "manual_cluster":
+            problem_groups = manual_clustering(problem_days, peak_loads, daily_gen)
+        else:
+            problem_groups = kmeans_cluster(
+                problem_days,
+                peak_loads[problem_days],
+                # Pass negative sign so naming works properly
+                -daily_gen[problem_days],
+                sources,
+                n_clusters=15
+            )
+        assert_partition(problem_groups.values(), set(problem_days))
+        # For worst case generation, look at the integral, since any
+        worst_load, worst_energy = worst_case_by_group(
+            problem_groups, load_per_day, energy_per_day)
+        worst_gen_pu = {
+            name: np.linalg.inv(gamma) @ energy
+            for name, energy in worst_energy.items()
         }
+        return PeakData(
+            problem_groups, worst_load, worst_gen_pu)
 
-    # TODO: consider minimum capacity factor than load peaks individually??
-    problem_days = topo_argmax(np.c_[
-        peak_loads, daily_gen
-    ])
 
-    # Group together days which are close together on the (peak_load, daily_solar)
-    # plane and find the worst case within each group, to reduce computational burden,
-    # at relatively small optimality cost.
-    problem_groups = manual_clustering(problem_days, peak_loads, daily_gen)
-    assert_partition(problem_groups.values(), set(problem_days))
-    # For worst case generation, look at the integral, since any
-    worst_load, worst_solar_energy = worst_case_by_group(
-        problem_groups, load_per_day, energy_solar_per_day)
-    worst_solar_pu = {
-        name: np.linalg.inv(gamma) @ solar_energy
-        for name, solar_energy in worst_solar_energy.items()
-    }
-    return worst_load, worst_solar_pu
+class PeakData:
+    def __init__(self, problem_groups, load, gen_pu):
+        # Problem groups: Dict[group] -> List of days
+        # load and solar_pu: Dict[group] -> array of load/generation
+        self.problem_groups = problem_groups
+        self.load = load
+        self.gen_pu = gen_pu
+
+    @classmethod
+    def single_group(cls, name, problem_days, load_per_day, gen_per_day):
+        return cls(
+            {name: problem_days},
+            {name: load_per_day[d] for d in problem_days},
+            {name: gen_per_day[d] for d in problem_days},
+        )
+

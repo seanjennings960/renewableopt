@@ -2,6 +2,8 @@ from itertools import groupby
 
 import numpy as np
 
+from renewableopt.peak_id import as_datetime, reshape_by_day, timedelta
+
 
 def groupby_index(it):
     with_index = list(zip(it, np.arange(len(it))))
@@ -17,6 +19,14 @@ def charge_periods(load, load_minus_batt, eps=1e-5):
     charge_action = np.choose(discharge_i.astype(int) - charge_i.astype(int) + 1,
                               ["Charge", "Full", "Discharge"])
     return list(groupby_index(charge_action))
+
+
+def day_indices(time, day):
+    dt = as_datetime(time)
+    return np.logical_and(
+        dt >= day,
+        dt < day + np.timedelta64(24, "h")
+    )
 
 
 class InfeasibleControlError(Exception):
@@ -63,11 +73,13 @@ class DispatchData:
         self.gen = gen
         self.u_batt = u_batt
         self.soc = soc
-        for arr in [load, gen, u_batt, soc]:
-            assert arr.shape[0] == time.shape[0]
+        for arr in [load, u_batt, soc]:
+            assert arr.shape == time.shape
+        assert gen.shape == (*time.shape, len(sources))
         self.sources = sources
         self.result = result
         self.feasible = feasible
+        self.dt = timedelta(time.flatten())
 
     def __getitem__(self, index):
         return DispatchData(
@@ -79,6 +91,17 @@ class DispatchData:
             self.sources,
             self.result,
             self.feasible
+        )
+
+    def by_day(self, day):
+        day = as_datetime(np.array(day * 24))
+        return self[day_indices(self.time, day)]
+
+
+    def per_day(self):
+        return DispatchData(
+            *reshape_by_day(self.time, self.load, self.gen, self.u_batt, self.soc),
+            self.sources, self.result, self.feasible
         )
 
     def __len__(self):
@@ -103,26 +126,35 @@ class DispatchData:
             time, load, gen_full, u_batt, soc, sources, result, feasible
         )
 
-    def curtail_generation(self, strategy="geothermal"):
+    def curtailed_generation(self, strategy="even"):
         sources = self.sources
         gen = self.gen.copy()
         total_gen_needed = self.load - self.u_batt
         if strategy in sources:
             curtail_i = sources.index(strategy)
             no_curtail_i = [i for i in range(len(sources)) if i != curtail_i]
-            other_gen = np.sum(gen[:, no_curtail_i], axis=1)
+            other_gen = np.sum(gen[..., no_curtail_i], axis=1)
             total_gen_needed -= other_gen
             if np.any(total_gen_needed < 0):
+                # Specifying a curtailment order would really be better than
+                # erroring here.
                 raise ValueError("Load/generation cannot be balanced by "
                                  f"curtailing only single source: {strategy}")
             # Limit only the source requested.
-            gen[:, curtail_i] = np.clip(gen[:, curtail_i], None,
+            gen[..., curtail_i] = np.clip(gen[..., curtail_i], None,
                                         total_gen_needed)
+        elif strategy=="even":
+            total_gen = np.sum(gen, axis=-1)
+            ratio = total_gen / total_gen_needed
+            gen /= ratio[..., np.newaxis]
         else:
             raise ValueError(f"Given strategy ({strategy}) "
                              f"does not match name of a source. "
                              f"Sources: {sources}")
         return gen
+
+    def total_curtailment(self):
+        return np.sum(self.gen - self.curtailed_generation("even"), axis=-1)
 
 
 

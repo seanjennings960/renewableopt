@@ -1,10 +1,10 @@
 from datetime import datetime
-from datetime import timedelta as dt_timedelta
 
 import matplotlib.pyplot as plt
 import numpy as np
 
 from renewableopt.optimal_design.dispatch import charge_periods, greedy_battery_control
+from renewableopt.peak_id import as_datetime
 
 ###############################################################################
 # Visualizations
@@ -26,12 +26,6 @@ def initialize_day_ranges():
             (end - JAN1).days
         )
     return day_ranges
-
-def as_datetime(time_rel_hr):
-    # Convert to numpy datetime....
-    jan1 = np.datetime64("2012-01-01 00:00")
-    dts_min = (time_rel_hr * 60).astype("timedelta64[m]")
-    return jan1 + dts_min
 
 # Constants for month related manipulations.
 DAY_RANGES = initialize_day_ranges()
@@ -61,7 +55,10 @@ def iter_months(data_per_day):
         yield data_per_day[start:end]
 
 
-def storage_capacity_statistics(result, soc_per_day):
+def storage_capacity_statistics(dispatch):
+    result = dispatch.result
+    soc_per_day = dispatch.per_day().soc
+
     E_max = result.E_max
     E_min = result.E_max * result.model.rho
     eod_soc = [soc[:, -1] for soc in iter_months(soc_per_day)]
@@ -85,8 +82,9 @@ def storage_capacity_statistics(result, soc_per_day):
     fig.autofmt_xdate(rotation=80)
 
 
-def daily_curtailment(dt, curtailment_by_day):
-    daily_curtailment = [np.sum(c, axis=1) * dt
+def daily_curtailment(dispatch):
+    curtailment_by_day = dispatch.per_day().total_curtailment()
+    daily_curtailment = [np.sum(c, axis=1) * dispatch.dt
                         for c in iter_months(curtailment_by_day)]
     fig = plt.figure()
     plt.boxplot(daily_curtailment, vert=True, patch_artist=True, labels=MONTH_NAMES)
@@ -131,18 +129,21 @@ def plot_battery_status(result, possible_controls, time, load, generation, title
     plots[1].axhline(y=result.model.rho * result.E_max, linestyle="--", color="orange", label="Minimum Capacity")
     plots[1].legend()
 
-def min_capacity_per_month(result, soc_per_day, u_batt_per_day, time_one_day, load_per_day, generation_per_day):
-    for month in range(1, 13):
+def min_capacity_per_month(dispatch, months):
+    pd = dispatch.per_day()
+    for month in months:
         start, end = DAY_RANGES[month]
         # Day with minimum capacity
         day = start + np.argmin(
             # Minimum start across day
-            np.min(soc_per_day[start:end], axis=1)
+            np.min(pd.soc[start:end], axis=1)
         )
-        date = datetime.strftime(JAN1 + dt_timedelta(days=int(day)), "%B %d")
-        plot_battery_status(result, {
-            "greedy": (u_batt_per_day[day], soc_per_day[day])
-        }, time_one_day, load_per_day[day], generation_per_day[day], date)
+        plot_stack(dispatch.by_day(day))
+        # date = datetime.strftime(JAN1 + dt_timedelta(days=int(day)), "%B %d")
+        # plot_battery_status(dispatch.result, {
+        #     "greedy": (pd.u_batt[day], pd.soc[day])
+        # }, pd.time[day], pd.load[day], np.sum(pd.gen[day], axis=-1), date)
+
 
 
 def readable(s):
@@ -165,7 +166,7 @@ def lp_versus_greedy_comparison(result, time_one_day, worst_load, worst_generati
             title=readable(scenario))
 
 
-def plot_stack(dispatch):
+def plot_stack(dispatch, curtailment=None):
     # time (T,)
     # load (T,)
     # gen (T, G)
@@ -173,7 +174,8 @@ def plot_stack(dispatch):
     time = as_datetime(dispatch.time)
     # time = dispatch.time
     load = dispatch.load
-    gen = dispatch.curtail_generation()
+    curtail_kwargs = {"strategy": curtailment} if curtailment is not None else {}
+    gen = dispatch.curtailed_generation(**curtail_kwargs)
 
     # Reorder generation so most utilized sources appear on bottom of stack
     gen_order = np.argsort(np.sum(dispatch.gen, axis=0))[::-1]
@@ -200,7 +202,10 @@ def plot_stack(dispatch):
         # load.
         if action == "Charge":
             # Append index so interval is closed.
-            i = np.append(indices, indices[-1] + 1)
+            if indices[-1] + 1 < len(time):
+                i = np.append(indices, indices[-1] + 1)
+            else:
+                i = indices
             plots[0].plot(time[i], load_minus_batt[i], "g",
                         linewidth=4,
                         label="Charge Load" if not charge_plotted else "")
