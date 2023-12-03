@@ -9,6 +9,7 @@ EXCEL_FILENAME = DATASET_DIR / "project2_load_profile.csv"
 NPZ_LOAD_FILE = DATASET_DIR / "project_2_load_profile.npz"
 GEOJSON_FILE = DATASET_DIR / "gis" / "SD_county_jurisdictions.geojson"
 NPZ_DNI_FILE = DATASET_DIR / "dni.npz"
+NPZ_WIND_FILE = DATASET_DIR / "wind_data" / "wind_corrected.npz"
 
 
 def load_load_data():
@@ -24,8 +25,15 @@ def load_solar_data(load_t):
     return match_solar_times(load_t, dnis["time"], solar_pu)
 
 
+def load_wind_data(load_t):
+    wind = np.load(NPZ_WIND_FILE)
+    return np.interp(load_t, wind["time_min"], wind["wind_pu"])
+
+
+
 GENERATION_LOADER = {
     "solar": load_solar_data,
+    "wind": load_wind_data,
     "geothermal": lambda _: 1
 }
 

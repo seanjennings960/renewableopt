@@ -30,7 +30,7 @@ def timedelta(time):
     assert np.all(np.isclose(np.diff(time), dt))
     return dt
 
-def reshape_by_day(time, load, solar_pu):
+def reshape_by_day(time, load, generation_pu):
     dt = timedelta(time)
     timesteps_per_day = assert_int(24 / dt)
     days = assert_int(time.shape[0] / timesteps_per_day)
@@ -38,8 +38,8 @@ def reshape_by_day(time, load, solar_pu):
     # load_per_day = load.reshape(days, timesteps_per_day)
     # solar_pu_per_day = solar_pu.reshape(days, timesteps_per_day)
     return tuple(
-        arr.reshape(days, timesteps_per_day)
-        for arr in [time, load, solar_pu]
+        arr.reshape(days, timesteps_per_day, -1).squeeze()
+        for arr in [time, load, generation_pu]
     )
 
 
@@ -119,40 +119,61 @@ def worst_case_by_group(problem_groups, load_per_day, energy_solar_per_day):
     return worst_load, worst_solar
 
 
-def identify_worst_days(time, load, solar_pu, *, use_cap_ratio=False):
+SUPPORTED_METHODS = ["toposort", "cap_ratio", "peak_load"]
+
+
+def identify_worst_days(time, load, gen_pu, *, method="toposort"):
+    if method not in SUPPORTED_METHODS:
+        raise ValueError(f"Method {method} not supported. Select from: {SUPPORTED_METHODS}")
     dt = timedelta(time)
-    time_per_day, load_per_day, solar_pu_per_day = reshape_by_day(
-        time, load, solar_pu
+    time_per_day, load_per_day, gen_pu_per_day = reshape_by_day(
+        time, load, gen_pu
     )
     timesteps_per_day = time_per_day.shape[1]
     # Integrate solar output over the course of the day.
     gamma = gamma_matrix(timesteps_per_day, dt)
-    energy_solar_per_day = solar_pu_per_day @ gamma.T
+    # Multiply over timesteps_per_day axis
+    # gen_pu_per_day has shape (days, timesteps, num_sources)
+    if gen_pu_per_day.ndim < 3:  # noqa
+        gen_pu_per_day = gen_pu_per_day[:, :, np.newaxis]
+    energy_solar_per_day = np.einsum(
+        "ijk,ja->ijk", gen_pu_per_day, gamma.T
+    )
 
     # Order by peak load and minimum daily solar generation.
     # Days with low generation could cause problems just as easily
     # as days with high load, so find maximums of partial ordering!
     peak_loads = np.max(load_per_day, axis=-1)
-    daily_solar = np.min(energy_solar_per_day, axis=-1)
+    daily_gen = np.min(energy_solar_per_day, axis=1)
 
-    if use_cap_ratio:
-        cap_ratio = peak_loads / daily_solar
+    if method=="cap_ratio":
+        # HACK: just use first generation source to determine ratio.
+        cap_ratio = peak_loads / daily_gen[:, 0]
         worst_index = np.argmin(cap_ratio)
         return ({
             "worst_cap_ratio": load_per_day[worst_index]
         }, {
-            "worst_cap_ratio": solar_pu_per_day[worst_index]
+            "worst_cap_ratio": gen_pu_per_day[worst_index]
         })
+    elif method=="peak_load":
+        worst_indices = np.argsort(peak_loads)
+        return {
+            f"peak_{i}": load_per_day[i]
+            for i in worst_indices[-5:]
+        }, {
+            f"peak_{i}": gen_pu_per_day[i]
+            for i in worst_indices[-5:]
+        }
 
     # TODO: consider minimum capacity factor than load peaks individually??
     problem_days = topo_argmax(np.c_[
-        peak_loads, daily_solar
+        peak_loads, daily_gen
     ])
 
     # Group together days which are close together on the (peak_load, daily_solar)
     # plane and find the worst case within each group, to reduce computational burden,
     # at relatively small optimality cost.
-    problem_groups = manual_clustering(problem_days, peak_loads, daily_solar)
+    problem_groups = manual_clustering(problem_days, peak_loads, daily_gen)
     assert_partition(problem_groups.values(), set(problem_days))
     # For worst case generation, look at the integral, since any
     worst_load, worst_solar_energy = worst_case_by_group(

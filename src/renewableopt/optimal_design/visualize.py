@@ -4,7 +4,7 @@ from datetime import timedelta as dt_timedelta
 import matplotlib.pyplot as plt
 import numpy as np
 
-from renewableopt.optimal_design.multi_period import greedy_battery_control
+from renewableopt.optimal_design.dispatch import charge_periods, greedy_battery_control
 
 ###############################################################################
 # Visualizations
@@ -26,6 +26,12 @@ def initialize_day_ranges():
             (end - JAN1).days
         )
     return day_ranges
+
+def as_datetime(time_rel_hr):
+    # Convert to numpy datetime....
+    jan1 = np.datetime64("2012-01-01 00:00")
+    dts_min = (time_rel_hr * 60).astype("timedelta64[m]")
+    return jan1 + dts_min
 
 # Constants for month related manipulations.
 DAY_RANGES = initialize_day_ranges()
@@ -157,3 +163,66 @@ def lp_versus_greedy_comparison(result, time_one_day, worst_load, worst_generati
         plot_battery_status(
             result, possible_controls, time_one_day, worst_load[scenario], generation,
             title=readable(scenario))
+
+
+def plot_stack(dispatch):
+    # time (T,)
+    # load (T,)
+    # gen (T, G)
+    # u_batt (T,)
+    time = as_datetime(dispatch.time)
+    # time = dispatch.time
+    load = dispatch.load
+    gen = dispatch.curtail_generation()
+
+    # Reorder generation so most utilized sources appear on bottom of stack
+    gen_order = np.argsort(np.sum(dispatch.gen, axis=0))[::-1]
+    gen = gen[:, gen_order]
+    sources = [dispatch.sources[i] for i in gen_order]
+    load_minus_batt = dispatch.load - dispatch.u_batt
+    gen_cumsum = np.c_[
+        np.zeros_like(dispatch.load), np.cumsum(gen, axis=1)
+    ]
+
+    fig, plots = plt.subplots(2, 1, sharex=True, height_ratios=[3, 1])
+    for i, source in enumerate(sources):
+        # Fill in stack with generation cumulative sum.
+        plots[0].fill_between(time, gen_cumsum[:, i],
+                            gen_cumsum[:, i+1], label=source)
+
+
+    charge_plotted = False
+    discharge_plotted = False
+    for action, indices in charge_periods(load, load_minus_batt):
+        # We plot charging and discharging differently. When charging,
+        # we want to visualize the generation source that is filling charge.
+        # We fill in the discharge area since this is contributing to meeting
+        # load.
+        if action == "Charge":
+            # Append index so interval is closed.
+            i = np.append(indices, indices[-1] + 1)
+            plots[0].plot(time[i], load_minus_batt[i], "g",
+                        linewidth=4,
+                        label="Charge Load" if not charge_plotted else "")
+            charge_plotted = True
+        elif action == "Discharge":
+            plots[0].fill_between(time[indices], load[indices],
+                                load_minus_batt[indices], color="C3",
+                                label="Battery Discharge" if not discharge_plotted else "")
+            discharge_plotted = True
+    plots[0].plot(time, load, "r", linewidth=4, label="Load")
+
+
+    plots[0].legend()
+    plots[0].set_ylabel("Power (MW)")
+    plt.suptitle("Dispatch Stack")
+    plots[1].plot(time, dispatch.soc)
+
+    E_max = dispatch.result.E_max
+    E_min = dispatch.result.model.rho * E_max
+    plots[1].axhline(E_max, color="g", linestyle="--", label="Maximum Capacity",)
+    plots[1].axhline(E_min, color="r", linestyle="--", label="Minimum Depth of Discharge")
+
+    plots[1].set_ylabel("Battery SoC (MWh)")
+    plots[1].legend()
+    fig.autofmt_xdate(rotation=80)
