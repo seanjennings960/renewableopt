@@ -1,6 +1,7 @@
 from pathlib import Path
 
 import numpy as np
+import pandas as pd
 
 # Remove these hard-coded directories?
 DATASET_DIR = Path(
@@ -69,7 +70,7 @@ def filter_days(start_day, num_days, load_t, load, generation_pu):
     return load_t, load, generation_pu
 
 
-def load_by_day(start_day, num_days, sources=None):
+def load_by_day(start_day, num_days, *, sources=None, use_hr=False):
     """
     Returns time, load, and generation for given day.
 
@@ -98,7 +99,32 @@ def load_by_day(start_day, num_days, sources=None):
     generation_pu = np.zeros((load_t.shape[0], len(sources)), np.float64)
     for i, source in enumerate(sources):
         generation_pu[:, i] = GENERATION_LOADER[source](load_t)
-    return filter_days(
+    load_t, load, generation_pu = filter_days(
         start_day, num_days,
         load_t, load["power"],
         generation_pu.squeeze())
+    if use_hr:
+        load_t /= 60
+    return load_t, load, generation_pu
+
+
+def load_excel(filename):
+    with pd.ExcelFile(filename) as f:
+        costs = pd.read_excel(f, sheet_name="Cost Scenarios", index_col=0)
+        loads = pd.read_excel(f, sheet_name="Load Scenarios", index_col=0)
+        generation = pd.read_excel(f, sheet_name="Generation", index_col="Time (hr)")
+    return costs, loads, generation
+
+
+def write_results(filename, df):
+    with pd.ExcelFile(filename) as f:
+        if "Sensitivity Result" in f.sheet_names:
+            resp = input("Sensitivity results sheet already exists. Replace results? [y/n]")
+            if resp != "y":
+                raise FileExistsError("Aborting!")
+            if_sheet_exists = "replace"
+        else:
+            if_sheet_exists = "error"
+
+    with pd.ExcelWriter(filename, mode="a", if_sheet_exists=if_sheet_exists) as writer:
+        df.to_excel(writer, sheet_name="Sensitivity Result")

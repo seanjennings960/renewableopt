@@ -80,6 +80,7 @@ def storage_capacity_statistics(dispatch):
         ax.axhline(y=E_max, color="green", label="maximum")
         ax.axhline(y=E_min, color="orange", label="minimum")
     fig.autofmt_xdate(rotation=80)
+    return fig
 
 
 def daily_curtailment(dispatch):
@@ -91,6 +92,7 @@ def daily_curtailment(dispatch):
     fig.autofmt_xdate(rotation=90)
     plt.title("Daily Curtailment By Month")
     plt.ylabel("Energy curtailed (MWh/day)")
+    return fig
 
 
 def plot_battery_status(result, possible_controls, time, load, generation, title=None, plots=None):
@@ -131,6 +133,7 @@ def plot_battery_status(result, possible_controls, time, load, generation, title
 
 def min_capacity_per_month(dispatch, months):
     pd = dispatch.per_day()
+    figs = []
     for month in months:
         start, end = DAY_RANGES[month]
         # Day with minimum capacity
@@ -138,11 +141,12 @@ def min_capacity_per_month(dispatch, months):
             # Minimum start across day
             np.min(pd.soc[start:end], axis=1)
         )
-        plot_stack(dispatch.by_day(day))
+        figs.append(plot_stack(dispatch.by_day(day)))
         # date = datetime.strftime(JAN1 + dt_timedelta(days=int(day)), "%B %d")
         # plot_battery_status(dispatch.result, {
         #     "greedy": (pd.u_batt[day], pd.soc[day])
         # }, pd.time[day], pd.load[day], np.sum(pd.gen[day], axis=-1), date)
+    return figs
 
 
 
@@ -231,6 +235,7 @@ def plot_stack(dispatch, curtailment=None):
     plots[1].set_ylabel("Battery SoC (MWh)")
     plots[1].legend()
     fig.autofmt_xdate(rotation=80)
+    return fig
 
 
 def plot_wind_solar_cluster(peak_data):
@@ -263,12 +268,15 @@ def plot_wind_solar_cluster(peak_data):
     plots[1][0].set_xlabel("Peak Load (MW)")
     plots[1][1].legend()
     plots[1][1].axis("off")
+    return fig
 
 
 def plot_cluster_1d(peak_data):
+    fig = plt.figure()
     solar = peak_data.daily_solar_capacity
     for name, days in peak_data.problem_groups.items():
         plt.plot(peak_data.peak_loads[days], solar[days], "x", label=name)
     plt.xlabel("Peak Load (MW)")
     plt.ylabel("Daily Capacity Factor (%)")
     plt.legend()
+    return fig

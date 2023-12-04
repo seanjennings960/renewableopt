@@ -48,6 +48,10 @@ class MultiPeriodResult:
         self.b0 = b0
         self.num_generation = num_generation
 
+    @property
+    def total_cost(self):
+        return self.result.fun
+
     def battery_control(self, k):
         # Find the battery control for a given scenario
         start = k * self.num_timesteps

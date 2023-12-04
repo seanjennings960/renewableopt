@@ -67,7 +67,7 @@ def greedy_battery_control(result, load, generation):
 
 
 class DispatchData:
-    def __init__(self, time, load, gen, u_batt, soc, sources, result, feasible):
+    def __init__(self, time, load, gen, u_batt, soc, sources, result, feasible, peak_data):
         self.time = time
         self.load = load
         self.gen = gen
@@ -80,6 +80,7 @@ class DispatchData:
         self.result = result
         self.feasible = feasible
         self.dt = timedelta(time.flatten())
+        self.peak_data = peak_data
 
     def __getitem__(self, index):
         return DispatchData(
@@ -90,7 +91,8 @@ class DispatchData:
             self.soc[index],
             self.sources,
             self.result,
-            self.feasible
+            self.feasible,
+            self.peak_data
         )
 
     def by_day(self, day):
@@ -101,14 +103,14 @@ class DispatchData:
     def per_day(self):
         return DispatchData(
             *reshape_by_day(self.time, self.load, self.gen, self.u_batt, self.soc),
-            self.sources, self.result, self.feasible
+            self.sources, self.result, self.feasible, self.peak_data
         )
 
     def __len__(self):
         return len(self.time)
 
     @classmethod
-    def from_greedy(cls, time, load, gen_pu, sources, result):
+    def from_greedy(cls, time, load, gen_pu, sources, result, peak_data):
         gen = result.scale_generation(gen_pu)
         gen_full = result.scale_generation(gen_pu, sum_sources=False)
         try:
@@ -123,7 +125,7 @@ class DispatchData:
             feasible = False
 
         return cls(
-            time, load, gen_full, u_batt, soc, sources, result, feasible
+            time, load, gen_full, u_batt, soc, sources, result, feasible, peak_data
         )
 
     def curtailed_generation(self, strategy="even"):
@@ -155,7 +157,3 @@ class DispatchData:
 
     def total_curtailment(self):
         return np.sum(self.gen - self.curtailed_generation("even"), axis=-1)
-
-
-
-
