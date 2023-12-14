@@ -17,11 +17,6 @@ Conditions for linearity of the (still informally) proposed problem are provided
 This repository does not purport to be a library with an externally-facing interface.
 It exists for now as a single-purpose application. The project's future direction is (as of Dec 2023) being deliberated.
 
-**Table of Contents**
-
-- [Request for Mathematical Details](#mathematical)
-- [License](#license)
-
 ## Request for Mathematical Details
 
 A core linear program (LP), implemented in the [SinglePeriodModel](https://github.com/seanjennings960/renewableopt/blob/master/src/renewableopt/optimal_design/single_period.py) class can be viewed for a flavor of the algorithm.
