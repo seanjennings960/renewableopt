@@ -67,23 +67,50 @@ class MultiPeriodResult:
         return np.r_[x0, x[:-1]]
 
     def scale_generation(self, generation_pu, *, sum_sources=True):
-        # Accepts pu generation of shape (T, G) (or shape (T,) if G=1).
-        # and returns a shape (T,) array of the total available generation
-        # at each time.
-        if generation_pu.ndim <= 1:
-            assert self.num_generation == 1, \
-                f"Got 1D generation_pu, but the number of generation sources is {self.num_generation}"
-        elif generation_pu.ndim != GEN_PROFILE_MAX_DIM:
-             raise ValueError("Only up to 2 dimensional generation profiles supported.")
-        else:
-            # 2D input array.
-            assert generation_pu.shape[1] == self.num_generation, \
-                f"Input has {generation_pu.shape[1]} generation sources, but result contains {self.num_generation}"
+        return scale_generation(self, generation_pu, sum_sources=sum_sources)
 
-        generation = generation_pu * self.P_generation
-        if generation.ndim == GEN_PROFILE_MAX_DIM and sum_sources:
-            generation = np.sum(generation, axis=-1)
-        return generation
+
+def scale_generation(result, generation_pu, *, sum_sources=True):
+    # Accepts pu generation of shape (T, G) (or shape (T,) if G=1).
+    # and returns a shape (T,) array of the total available generation
+    # at each time.
+    if generation_pu.ndim <= 1:
+        assert result.num_generation == 1, \
+            f"Got 1D generation_pu, but the number of generation sources is {result.num_generation}"
+    elif generation_pu.ndim != GEN_PROFILE_MAX_DIM:
+            raise ValueError("Only up to 2 dimensional generation profiles supported.")
+    else:
+        # 2D input array.
+        assert generation_pu.shape[1] == result.num_generation, \
+            f"Input has {generation_pu.shape[1]} generation sources, but result contains {result.num_generation}"
+
+    generation = generation_pu * result.P_generation
+    if generation.ndim == GEN_PROFILE_MAX_DIM and sum_sources:
+        generation = np.sum(generation, axis=-1)
+    return generation
+
+
+class MockOptimizationResult:
+    def __init__(self, E_max, P_generation, P_batt, dt, model: "MultiPeriodModel"):
+        self.E_max = E_max
+        self.P_generation = np.array(P_generation)
+        self.P_battery = P_batt
+        self.dt = dt
+        self.num_generation = len(self.P_generation)
+        self.model = model
+
+    @property
+    def total_cost(self):
+        return (
+            self.E_max * self.model.cost_battery_energy +
+            self.P_battery * self.model.cost_battery_power +
+            np.sum(self.P_generation * self.model.cost_generation)
+        )
+
+    def scale_generation(self, generation_pu, *, sum_sources=True):
+        return scale_generation(self, generation_pu, sum_sources=sum_sources)
+
+
 
 class MultiPeriodModel:
     def __init__(self, initial_battery_charge, depth_of_discharge,

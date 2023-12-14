@@ -2,6 +2,7 @@ from itertools import groupby
 
 import numpy as np
 
+from renewableopt.optimal_design.multi_period import MockOptimizationResult
 from renewableopt.peak_id import as_datetime, reshape_by_day, timedelta
 
 
@@ -127,6 +128,27 @@ class DispatchData:
         return cls(
             time, load, gen_full, u_batt, soc, sources, result, feasible, peak_data
         )
+
+    def worst_cases(self):
+        per_day = self.per_day()
+        peaks = self.peak_data
+        time_one_day = per_day.time[0]
+        return {
+            grp: DispatchData.from_greedy(
+                time_one_day, peaks.load[grp],
+                peaks.gen_pu[grp], self.sources, self.result, self.peak_data)
+            for grp in peaks.load.keys()
+        }
+
+
+    def increment_capacity(self, delta_P_batt, delta_E_batt, delta_P_gen, gen_pu):
+        E_max = self.result.E_max + delta_E_batt
+        P_generation = self.result.P_generation + delta_P_gen
+        P_batt = self.result.P_battery + delta_P_batt
+        new_result = MockOptimizationResult(
+            E_max, P_generation, P_batt, self.result.dt, self.result.model)
+        return DispatchData.from_greedy(
+            self.time, self.load, gen_pu, self.sources, new_result, self.peak_data)
 
     def curtailed_generation(self, strategy="even"):
         sources = self.sources

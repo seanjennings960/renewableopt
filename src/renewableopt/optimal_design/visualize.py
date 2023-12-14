@@ -55,43 +55,49 @@ def iter_months(data_per_day):
         yield data_per_day[start:end]
 
 
-def storage_capacity_statistics(dispatch):
+def storage_capacity_statistics(dispatch, *, hack=False):
     result = dispatch.result
     soc_per_day = dispatch.per_day().soc
 
     E_max = result.E_max
     E_min = result.E_max * result.model.rho
-    eod_soc = [soc[:, -1] for soc in iter_months(soc_per_day)]
+    # eod_soc = [soc[:, -1] for soc in iter_months(soc_per_day)]
     min_soc = [np.min(soc, axis=1) for soc in iter_months(soc_per_day)]
+    # HACK: remove bad data from first day
+    if hack:
+        min_soc[0] = min_soc[1]
     # max_soc = [np.max(soc, axis=1) for soc in iter_months(soc_per_day)]
 
-    fig, (ax1, ax2) = plt.subplots(1, 2, sharey=True)
+    # fig, (ax1, ax2) = plt.subplots(1, 2, sharey=True)
+    fig = plt.figure()
     # fig, (ax1, ax2, ax3) = plt.subplots(1, 3, sharey=True)
-    plt.suptitle("Storage Capacity Statistics by Month")
-    ax1.boxplot(eod_soc, vert=True, patch_artist=True, labels=MONTH_NAMES)
-    ax1.set_title("Storage Remaining End of Day")
-    ax1.set_ylabel("Energy (MWh)")
-    ax2.boxplot(min_soc, vert=True, patch_artist=True, labels=MONTH_NAMES)
-    ax2.set_title("Minimum Capacity Reached")
+    # plt.suptitle("Storage Capacity Statistics by Month")
+    # plt.boxplot(eod_soc, vert=True, patch_artist=True, labels=MONTH_NAMES)
+    # plt.set_title("Storage Remaining End of Day")
+    # plt.set_ylabel("Energy (MWh)")
+    plt.boxplot(min_soc, vert=True, patch_artist=True, labels=MONTH_NAMES)
+    plt.title("Minimum Capacity Reached")
+    plt.ylabel("Battery Charge (MWh)")
     # ax3.boxplot(max_soc, vert=True, patch_artist=True, labels=month_names)
     # ax3.set_title("Maximum Capacity Reached")
     # for ax in [ax1, ax2, ax3]:
-    for ax in [ax1, ax2]:
-        ax.axhline(y=E_max, color="green", label="maximum")
-        ax.axhline(y=E_min, color="orange", label="minimum")
+    # for ax in [ax1, ax2]:
+    plt.axhline(y=E_max, color="green", label="maximum")
+    plt.axhline(y=E_min, color="orange", label="minimum")
+    # plt.legend()
     fig.autofmt_xdate(rotation=80)
     return fig
 
 
 def daily_curtailment(dispatch):
     curtailment_by_day = dispatch.per_day().total_curtailment()
-    daily_curtailment = [np.sum(c, axis=1) * dispatch.dt
+    daily_curtailment = [np.sum(c, axis=1) * dispatch.dt / 1000
                         for c in iter_months(curtailment_by_day)]
     fig = plt.figure()
     plt.boxplot(daily_curtailment, vert=True, patch_artist=True, labels=MONTH_NAMES)
-    fig.autofmt_xdate(rotation=90)
+    fig.autofmt_xdate(rotation=80)
     plt.title("Daily Curtailment By Month")
-    plt.ylabel("Energy curtailed (MWh/day)")
+    plt.ylabel("Energy curtailed (GWh/day)")
     return fig
 
 
@@ -194,7 +200,7 @@ def plot_stack(dispatch, curtailment=None):
     for i, source in enumerate(sources):
         # Fill in stack with generation cumulative sum.
         plots[0].fill_between(time, gen_cumsum[:, i],
-                            gen_cumsum[:, i+1], label=source)
+                            gen_cumsum[:, i+1], label=source.capitalize())
 
 
     charge_plotted = False
@@ -222,7 +228,7 @@ def plot_stack(dispatch, curtailment=None):
     plots[0].plot(time, load, "r", linewidth=4, label="Load")
 
 
-    plots[0].legend()
+    plots[0].legend(bbox_to_anchor=(1, 0.8))
     plots[0].set_ylabel("Power (MW)")
     plt.suptitle("Dispatch Stack")
     plots[1].plot(time, dispatch.soc)
@@ -230,10 +236,10 @@ def plot_stack(dispatch, curtailment=None):
     E_max = dispatch.result.E_max
     E_min = dispatch.result.model.rho * E_max
     plots[1].axhline(E_max, color="g", linestyle="--", label="Maximum Capacity",)
-    plots[1].axhline(E_min, color="r", linestyle="--", label="Minimum Depth of Discharge")
+    plots[1].axhline(E_min, color="r", linestyle="--", label="Minimum Depth \nof Discharge")
 
     plots[1].set_ylabel("Battery SoC (MWh)")
-    plots[1].legend()
+    plots[1].legend(bbox_to_anchor=(1, 0.6))
     fig.autofmt_xdate(rotation=80)
     return fig
 

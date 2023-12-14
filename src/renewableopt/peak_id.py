@@ -165,7 +165,11 @@ def kmeans_cluster(problem_days, load, gen, sources, n_clusters=5):
 #     load = peak_loads[problem_days]
 #     gen = daily_gen[problem_days]
     kmeans = KMeans(n_clusters=n_clusters, n_init="auto").fit(np.c_[
-        load, gen
+        # HACK: gen is in unit MWh/day/MW_installed, so a value of 24,
+        # corresponds to capacity factor 1. Multiply by 100 so to get
+        # a percentage-based capacity factor 10-40%. peak loads are typically
+        # 70-100 MW, so this roughly normalizes them...
+        load, gen * 100/24
     ])
     names = cluster_names(kmeans, load, gen, sources)
     return {
@@ -286,7 +290,7 @@ def identify_worst_days(time, load, gen_pu, *, sources=None, method="kmeans_clus
 class PeakData:
     def __init__(self, problem_groups, load, gen_pu, peak_loads, daily_gen):
         # Problem groups: Dict[group] -> List of days
-        # load and solar_pu: Dict[group] -> array of load/generation
+        # load and gen_pu: Dict[group] -> array of load/generation
         self.problem_groups = problem_groups
         self.load = load
         self.gen_pu = gen_pu
