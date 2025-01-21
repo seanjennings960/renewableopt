@@ -1,6 +1,9 @@
+from pathlib import Path
+
 import numpy as np
 import pandas as pd
-from pathlib import Path
+
+DATA_DIR = Path("/home/sean/disk_drive/li_ion_battery_degradation_data/doe_strobl/Multi-Stage_Aging_Study")
 
 
 def import_datafile(file: Path) -> pd.DataFrame:
@@ -13,11 +16,11 @@ def import_datafile(file: Path) -> pd.DataFrame:
     """
 
     # read file
-    df = pd.read_csv(file, encoding='iso-8859-1')
+    df = pd.read_csv(file, encoding="iso-8859-1")
 
     # timestamp to seconds
     first_run_time = df.run_time[0]
-    if first_run_time is not None and ':' in str(first_run_time):
+    if first_run_time is not None and ":" in str(first_run_time):
         df.run_time = timestamp_to_seconds(df.run_time)
 
     # reset time to start with 0
@@ -37,9 +40,9 @@ def timestamp_to_seconds(timestamp: np.ndarray) -> np.ndarray:
     """
     try:
         seconds = pd.to_timedelta(timestamp)
-        seconds = seconds / np.timedelta64(1, 's')
+        seconds = seconds / np.timedelta64(1, "s")
     except ValueError:
-        print("Error: The input timestamp is not in the correct format (hh:mm:SS.sss).")
+        print("Error: The input timestamp is not in the correct format (hh:mm:SS.sss).")  # noqa
         return None
 
     return seconds

@@ -5,7 +5,7 @@ import pandas as pd
 
 # Remove these hard-coded directories?
 DATASET_DIR = Path(
-    "/home/sean/data/studies/data_current_classes/renewables_course/Project2/datasets")
+    "/home/sean/data/studies/masters_classes/fall_2023/renewables_course/Project2/datasets")
 EXCEL_FILENAME = DATASET_DIR / "project2_load_profile.csv"
 NPZ_LOAD_FILE = DATASET_DIR / "project_2_load_profile.npz"
 GEOJSON_FILE = DATASET_DIR / "gis" / "SD_county_jurisdictions.geojson"
